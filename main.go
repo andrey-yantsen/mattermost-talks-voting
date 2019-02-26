@@ -1,10 +1,8 @@
-// Copyright (c) 2016 Mattermost, Inc. All Rights Reserved.
-// See License.txt for license information.
-
 package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/mattermost/mattermost-server/model"
 	"os"
 	"os/signal"
@@ -23,6 +21,7 @@ var webSocketClient *model.WebSocketClient
 var botUser *model.User
 var botTeam *model.Team
 var debuggingChannel *model.Channel
+var storage *Storage
 
 func main() {
 	userEmail := flag.String("user-email", "talks-voting@example.com", "Email set for the bot")
@@ -30,8 +29,21 @@ func main() {
 	serverUrl := flag.String("server-url", "http://localhost:8065", "Server url")
 	team := flag.String("team", "demo", "Team name in the mattermost")
 	createDebugChannel := flag.Bool("create-debug-channel", false, "Whenever to create a debug channel")
+	storageUri := flag.String("storage", "file:./storage/database.sqlite3?cache=shared", "SQLite database URI to use")
 
 	flag.Parse()
+
+	storage, err := DbConnect(*storageUri)
+
+	if err != nil {
+		fmt.Printf("Unable to connect to local database: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := storage.Migrate(); err != nil {
+		fmt.Printf("Unable to apply migrations: %v\n", err)
+		os.Exit(1)
+	}
 
 	SetupGracefulShutdown()
 
@@ -47,10 +59,10 @@ func main() {
 	}
 
 	wsUrl := strings.Replace(strings.Replace(*serverUrl, "http://", "ws://", 1), "https://", "ws://", 1)
-	webSocketClient, err := model.NewWebSocketClient4(wsUrl, client.AuthToken)
+	webSocketClient, wsErr := model.NewWebSocketClient4(wsUrl, client.AuthToken)
 	if err != nil {
 		println("We failed to connect to the web socket")
-		PrintError(err)
+		PrintError(wsErr)
 	}
 
 	webSocketClient.Listen()

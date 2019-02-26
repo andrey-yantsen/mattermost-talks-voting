@@ -1,23 +1,23 @@
-ARG GO_VERSION=1.12
+ARG GO_VERSION=1.11
 FROM golang:${GO_VERSION}-alpine AS builder
 RUN mkdir /user && \
     echo 'nobody:x:65534:65534:nobody:/:' > /user/passwd && \
     echo 'nobody:x:65534:' > /user/group
-RUN apk add --no-cache ca-certificates git
+RUN apk add --no-cache ca-certificates git sqlite tzdata gcc musl-dev
 WORKDIR /src
-COPY ./cmd/bot/go.mod ./cmd/bot/go.sum ./
+COPY ./go.mod ./go.sum ./
 RUN go mod download
 
 COPY ./ ./
 
-RUN CGO_ENABLED=0 go build \
-    -installsuffix 'static' \
-    -o /app cmd/bot/main.go
+RUN GOOS=linux go build -ldflags="-w -s" -a -installsuffix 'static' -o /app
 
-FROM scratch AS final
+FROM alpine AS final
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /user/group /user/passwd /etc/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /app /app
+COPY --from=builder /app /
+COPY --from=builder /src/migrations /migrations
 EXPOSE 8080
 VOLUME /storage
 USER nobody:nobody

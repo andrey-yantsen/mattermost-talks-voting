@@ -1,1 +1,2 @@
-# mattermost-talks-voting
+# Talks Voting, the Mattermost plugin
+
