@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/mattermost/mattermost-server/model"
+	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -11,29 +13,62 @@ import (
 )
 
 const (
-	APPLICATION_NAME = "Mattermost Talks Voting Bot"
-	CHANNEL_LOG_NAME = "talks-voting-bot-debug"
+	ApplicationName = "Mattermost Talks Voting Bot"
+	ChannelLogName  = "talks-voting-bot-debug"
 )
 
-var client *model.Client4
-var webSocketClient *model.WebSocketClient
+type Bot struct {
+	client *model.Client4
+	webSocketClient *model.WebSocketClient
+	botUser *model.User
+	botTeam *model.Team
+	debuggingChannel *model.Channel
+	storage *Storage
+	callbackUrlBase string
+}
 
-var botUser *model.User
-var botTeam *model.Team
-var debuggingChannel *model.Channel
-var storage *Storage
+func NewBot(serverUrl, userEmail, password, team, storageUrl, callbackUrl string) *Bot {
+	ret := &Bot{
+		client: model.NewAPIv4Client(serverUrl),
+		callbackUrlBase: callbackUrl,
+	}
+	ret.connectStorage(storageUrl)
+	ret.makeSureServerIsRunning()
+	ret.loginAsTheBotUser(userEmail, password)
+	ret.findBotTeam(team)
+	ret.setupGracefulShutdown()
+	ret.ensureCommands()
+
+	return ret
+}
 
 func main() {
 	userEmail := flag.String("user-email", "talks-voting@example.com", "Email set for the bot")
 	password := flag.String("password", "password", "Password for the bot")
 	serverUrl := flag.String("server-url", "http://localhost:8065", "Server url")
+	callbackUrl := flag.String("callback-url-base", "http://localhost:8080", "Callback URL")
 	team := flag.String("team", "demo", "Team name in the mattermost")
-	createDebugChannel := flag.Bool("create-debug-channel", false, "Whenever to create a debug channel")
+	createDebugChannel := flag.Bool("create-debug-channel", false, "Create a debug channel")
 	storageUri := flag.String("storage", "file:./storage/database.sqlite3?cache=shared", "SQLite database URI to use")
 
 	flag.Parse()
 
-	storage, err := DbConnect(*storageUri)
+	bot := NewBot(*serverUrl, *userEmail, *password, *team, *storageUri, *callbackUrl)
+
+	if *createDebugChannel {
+		bot.CreateBotDebuggingChannelIfNeeded()
+		bot.SendMsgToDebuggingChannel("_"+ApplicationName+" has **started** running_", "")
+		wsUrl := strings.Replace(strings.Replace(*serverUrl, "http://", "ws://", 1), "https://", "ws://", 1)
+		bot.ConnectWebSocket(wsUrl)
+	}
+
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func (b *Bot) connectStorage(uri string) {
+	storage, err := DbConnect(uri)
 
 	if err != nil {
 		fmt.Printf("Unable to connect to local database: %v\n", err)
@@ -44,25 +79,13 @@ func main() {
 		fmt.Printf("Unable to apply migrations: %v\n", err)
 		os.Exit(1)
 	}
+}
 
-	SetupGracefulShutdown()
-
-	client = model.NewAPIv4Client(*serverUrl)
-
-	MakeSureServerIsRunning()
-	LoginAsTheBotUser(*userEmail, *password)
-	FindBotTeam(*team)
-
-	if *createDebugChannel {
-		CreateBotDebuggingChannelIfNeeded()
-		SendMsgToDebuggingChannel("_"+APPLICATION_NAME+" has **started** running_", "")
-	}
-
-	wsUrl := strings.Replace(strings.Replace(*serverUrl, "http://", "ws://", 1), "https://", "ws://", 1)
-	webSocketClient, wsErr := model.NewWebSocketClient4(wsUrl, client.AuthToken)
+func (b *Bot) ConnectWebSocket(uri string) {
+	webSocketClient, err := model.NewWebSocketClient4(uri, b.client.AuthToken)
 	if err != nil {
 		println("We failed to connect to the web socket")
-		PrintError(wsErr)
+		b.PrintError(err)
 	}
 
 	webSocketClient.Listen()
@@ -71,95 +94,102 @@ func main() {
 		for {
 			select {
 			case resp := <-webSocketClient.EventChannel:
-				HandleWebSocketResponse(resp)
+				b.HandleWebSocketResponse(resp)
 			}
 		}
 	}()
-
-	// You can block forever with
-	select {}
 }
 
-func MakeSureServerIsRunning() {
-	if props, resp := client.GetOldClientConfig(""); resp.Error != nil {
+func (b *Bot) ensureCommands() {
+	http.HandleFunc("/cmd/add", b.HandleCmdAdd)
+	http.HandleFunc("/cmd/destroy", b.HandleCmdDestroy)
+	http.HandleFunc("/cmd/live", b.HandleCmdLive)
+	http.HandleFunc("/cmd/register", b.HandleCmdRegister)
+	http.HandleFunc("/cmd/skip", b.HandleCmdSkip)
+	http.HandleFunc("/cmd/topics", b.HandleCmdTopics)
+	http.HandleFunc("/cmd/update", b.HandleCmdUpdate)
+}
+
+func (b *Bot) makeSureServerIsRunning() {
+	if props, resp := b.client.GetOldClientConfig(""); resp.Error != nil {
 		println("There was a problem pinging the Mattermost server.  Are you sure it's running?")
-		PrintError(resp.Error)
+		b.PrintError(resp.Error)
 		os.Exit(1)
 	} else {
 		println("Server detected and is running version " + props["Version"])
 	}
 }
 
-func LoginAsTheBotUser(email, password string) {
-	if user, resp := client.Login(email, password); resp.Error != nil {
+func (b *Bot) loginAsTheBotUser(email, password string) {
+	if user, resp := b.client.Login(email, password); resp.Error != nil {
 		println("There was a problem logging into the Mattermost server.  Are you sure ran the setup steps from the README.md?")
-		PrintError(resp.Error)
+		b.PrintError(resp.Error)
 		os.Exit(1)
 	} else {
-		botUser = user
+		b.botUser = user
 	}
 }
 
-func FindBotTeam(teamName string) {
-	if team, resp := client.GetTeamByName(teamName, ""); resp.Error != nil {
+func (b *Bot) findBotTeam(teamName string) {
+	if team, resp := b.client.GetTeamByName(teamName, ""); resp.Error != nil {
 		println("We failed to get the initial load")
 		println("or we do not appear to be a member of the team '" + teamName + "'")
-		PrintError(resp.Error)
+		b.PrintError(resp.Error)
 		os.Exit(1)
 	} else {
-		botTeam = team
+		b.botTeam = team
 	}
 }
 
-func CreateBotDebuggingChannelIfNeeded() {
-	if rchannel, resp := client.GetChannelByName(CHANNEL_LOG_NAME, botTeam.Id, ""); resp.Error != nil {
+func (b *Bot) CreateBotDebuggingChannelIfNeeded() {
+	if rchannel, resp := b.client.GetChannelByName(ChannelLogName, b.botTeam.Id, ""); resp.Error != nil {
 		println("We failed to get the channels")
-		PrintError(resp.Error)
+		b.PrintError(resp.Error)
 	} else {
-		debuggingChannel = rchannel
+		b.debuggingChannel = rchannel
 		return
 	}
 
 	// Looks like we need to create the logging channel
 	channel := &model.Channel{}
-	channel.Name = CHANNEL_LOG_NAME
-	channel.DisplayName = "Debugging For " + APPLICATION_NAME
+	channel.Name = ChannelLogName
+	channel.DisplayName = "Debugging For " + ApplicationName
 	channel.Purpose = "This is used as a test channel for logging bot debug messages"
 	channel.Type = model.CHANNEL_OPEN
-	channel.TeamId = botTeam.Id
-	if rchannel, resp := client.CreateChannel(channel); resp.Error != nil {
-		println("We failed to create the channel " + CHANNEL_LOG_NAME)
-		PrintError(resp.Error)
+	channel.TeamId = b.botTeam.Id
+	if rchannel, resp := b.client.CreateChannel(channel); resp.Error != nil {
+		println("We failed to create the channel " + ChannelLogName)
+		b.PrintError(resp.Error)
 	} else {
-		debuggingChannel = rchannel
-		println("Looks like this might be the first run so we've created the channel " + CHANNEL_LOG_NAME)
+		b.debuggingChannel = rchannel
+		println("Looks like this might be the first run so we've created the channel " + ChannelLogName)
 	}
 }
 
-func SendMsgToDebuggingChannel(msg string, replyToId string) {
-	if debuggingChannel == nil {
+func (b *Bot) SendMsgToDebuggingChannel(msg string, replyToId string) {
+	if b.debuggingChannel == nil {
 		return
 	}
 
 	post := &model.Post{}
-	post.ChannelId = debuggingChannel.Id
+	post.ChannelId = b.debuggingChannel.Id
 	post.Message = msg
 
 	post.RootId = replyToId
 
-	if _, resp := client.CreatePost(post); resp.Error != nil {
+	if _, resp := b.client.CreatePost(post); resp.Error != nil {
 		println("We failed to send a message to the logging channel")
-		PrintError(resp.Error)
+		b.PrintError(resp.Error)
 	}
 }
 
-func HandleWebSocketResponse(event *model.WebSocketEvent) {
-	if debuggingChannel != nil && event.Broadcast.ChannelId == debuggingChannel.Id {
-		HandleMsgFromDebuggingChannel(event)
+func (b *Bot) HandleWebSocketResponse(event *model.WebSocketEvent) {
+	if b.debuggingChannel != nil && event.Broadcast.ChannelId == b.debuggingChannel.Id {
+		b.HandleMsgFromDebuggingChannel(event)
 	}
 }
 
-func HandleMsgFromDebuggingChannel(event *model.WebSocketEvent) {
+func (b *Bot) HandleMsgFromDebuggingChannel(event *model.WebSocketEvent) {
 	if event.Event != model.WEBSOCKET_EVENT_POSTED {
 		return
 	}
@@ -168,51 +198,36 @@ func HandleMsgFromDebuggingChannel(event *model.WebSocketEvent) {
 
 	post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
 	if post != nil {
-		if post.UserId == botUser.Id {
+		if post.UserId == b.botUser.Id {
 			return
 		}
 
 		if matched, _ := regexp.MatchString(`(?:^|\W)alive(?:$|\W)`, post.Message); matched {
-			SendMsgToDebuggingChannel("Yes I'm running", post.Id)
-			return
-		}
-
-		if matched, _ := regexp.MatchString(`(?:^|\W)up(?:$|\W)`, post.Message); matched {
-			SendMsgToDebuggingChannel("Yes I'm running", post.Id)
-			return
-		}
-
-		if matched, _ := regexp.MatchString(`(?:^|\W)running(?:$|\W)`, post.Message); matched {
-			SendMsgToDebuggingChannel("Yes I'm running", post.Id)
-			return
-		}
-
-		if matched, _ := regexp.MatchString(`(?:^|\W)hello(?:$|\W)`, post.Message); matched {
-			SendMsgToDebuggingChannel("Yes I'm running", post.Id)
+			b.SendMsgToDebuggingChannel("Yes I'm running", post.Id)
 			return
 		}
 	}
 
-	SendMsgToDebuggingChannel("I did not understand you!", post.Id)
+	b.SendMsgToDebuggingChannel("I did not understand you!", post.Id)
 }
 
-func PrintError(err *model.AppError) {
+func (b *Bot) PrintError(err *model.AppError) {
 	println("\tError Details:")
 	println("\t\t" + err.Message)
 	println("\t\t" + err.Id)
 	println("\t\t" + err.DetailedError)
 }
 
-func SetupGracefulShutdown() {
+func (b *Bot) setupGracefulShutdown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for _ = range c {
-			if webSocketClient != nil {
-				webSocketClient.Close()
+			if b.webSocketClient != nil {
+				b.webSocketClient.Close()
 			}
 
-			SendMsgToDebuggingChannel("_"+APPLICATION_NAME+" has **stopped** running_", "")
+			b.SendMsgToDebuggingChannel("_"+ApplicationName+" has **stopped** running_", "")
 			os.Exit(0)
 		}
 	}()
