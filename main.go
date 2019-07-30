@@ -41,18 +41,18 @@ func NewBot(serverUrl, accessToken, storageUrl, callbackUrl string) *Bot {
 }
 
 func main() {
-	accessToken := flag.String("access-token", "t9ps9zphmfraur6rsfz13ipgcc", "Access token for the bot")
+	accessToken := flag.String("access-token", "", "Access token for the bot")
 	serverUrl := flag.String("server-url", "http://localhost:8065", "Server url")
 	callbackUrl := flag.String("callback-url-base", "http://localhost:8080", "Callback URL")
 	team := flag.String("team", "demo", "Team name in the mattermost")
-	createDebugChannel := flag.Bool("create-debug-channel", false, "Create a debug channel")
+	enableDebugChannel := flag.Bool("enable-debug-channel", false, "Enable debug channel")
 	storageUri := flag.String("storage", "file:./storage/database.sqlite3?cache=shared", "SQLite database URI to use")
 
 	flag.Parse()
 
 	bot := NewBot(*serverUrl, *accessToken, *storageUri, *callbackUrl)
 
-	if *createDebugChannel {
+	if *enableDebugChannel {
 		bot.FindBotTeam(*team)
 		bot.SetupGracefulShutdown()
 		bot.CreateBotDebuggingChannelIfNeeded()
@@ -76,28 +76,11 @@ func (b *Bot) connectStorage(uri string) {
 		fmt.Printf("Unable to apply migrations: %v\n", err)
 		os.Exit(1)
 	}
+
+	b.storage = storage
 }
 
-func (b *Bot) ConnectWebSocket(uri string) {
-	webSocketClient, err := model.NewWebSocketClient4(uri, b.client.AuthToken)
-	if err != nil {
-		println("We failed to connect to the web socket")
-		b.PrintError(err)
-	}
-
-	webSocketClient.Listen()
-
-	go func() {
-		for {
-			select {
-			case resp := <-webSocketClient.EventChannel:
-				b.HandleWebSocketResponse(resp)
-			}
-		}
-	}()
-}
-
-func (b *Bot) ensureCommands() {
+func (b *Bot) setupCommandHandlers() {
 	http.HandleFunc("/cmd/add", b.HandleCmdAdd)
 	http.HandleFunc("/cmd/destroy", b.HandleCmdDestroy)
 	http.HandleFunc("/cmd/live", b.HandleCmdLive)
