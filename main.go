@@ -85,6 +85,7 @@ func (b *Bot) setupCommandHandlers() {
 	http.HandleFunc("/cmd/destroy", b.HandleCmdDestroy)
 	http.HandleFunc("/cmd/live", b.HandleCmdLive)
 	http.HandleFunc("/cmd/register", b.HandleCmdRegister)
+	http.HandleFunc("/dialog/register", b.HandleDialogRegister)
 	http.HandleFunc("/cmd/skip", b.HandleCmdSkip)
 	http.HandleFunc("/cmd/topics", b.HandleCmdTopics)
 	http.HandleFunc("/cmd/update", b.HandleCmdUpdate)
