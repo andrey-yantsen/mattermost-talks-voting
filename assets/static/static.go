@@ -1,6 +1,6 @@
 // +build !deploy_build
 
-package templates
+package static
 
 import (
 	"net/http"

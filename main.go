@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	static "github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
+	"github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
 )
 
 const (
