@@ -18,33 +18,30 @@ const (
 )
 
 type Bot struct {
-	client *model.Client4
-	webSocketClient *model.WebSocketClient
-	botUser *model.User
-	botTeam *model.Team
+	client           *model.Client4
+	botUser          *model.User
+	botTeam          *model.Team
 	debuggingChannel *model.Channel
-	storage *Storage
-	callbackUrlBase string
+	storage          *Storage
+	callbackUrlBase  string
+	pingReceived     bool
 }
 
-func NewBot(serverUrl, userEmail, password, team, storageUrl, callbackUrl string) *Bot {
+func NewBot(serverUrl, accessToken, storageUrl, callbackUrl string) *Bot {
 	ret := &Bot{
-		client: model.NewAPIv4Client(serverUrl),
+		client:          model.NewAPIv4Client(serverUrl),
 		callbackUrlBase: callbackUrl,
 	}
 	ret.connectStorage(storageUrl)
 	ret.makeSureServerIsRunning()
-	ret.loginAsTheBotUser(userEmail, password)
-	ret.findBotTeam(team)
-	ret.setupGracefulShutdown()
-	ret.ensureCommands()
+	ret.login(accessToken)
+	ret.setupCommandHandlers()
 
 	return ret
 }
 
 func main() {
-	userEmail := flag.String("user-email", "talks-voting@example.com", "Email set for the bot")
-	password := flag.String("password", "password", "Password for the bot")
+	accessToken := flag.String("access-token", "t9ps9zphmfraur6rsfz13ipgcc", "Access token for the bot")
 	serverUrl := flag.String("server-url", "http://localhost:8065", "Server url")
 	callbackUrl := flag.String("callback-url-base", "http://localhost:8080", "Callback URL")
 	team := flag.String("team", "demo", "Team name in the mattermost")
@@ -53,13 +50,13 @@ func main() {
 
 	flag.Parse()
 
-	bot := NewBot(*serverUrl, *userEmail, *password, *team, *storageUri, *callbackUrl)
+	bot := NewBot(*serverUrl, *accessToken, *storageUri, *callbackUrl)
 
 	if *createDebugChannel {
+		bot.FindBotTeam(*team)
+		bot.SetupGracefulShutdown()
 		bot.CreateBotDebuggingChannelIfNeeded()
 		bot.SendMsgToDebuggingChannel("_"+ApplicationName+" has **started** running_", "")
-		wsUrl := strings.Replace(strings.Replace(*serverUrl, "http://", "ws://", 1), "https://", "ws://", 1)
-		bot.ConnectWebSocket(wsUrl)
 	}
 
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -120,8 +117,9 @@ func (b *Bot) makeSureServerIsRunning() {
 	}
 }
 
-func (b *Bot) loginAsTheBotUser(email, password string) {
-	if user, resp := b.client.Login(email, password); resp.Error != nil {
+func (b *Bot) login(token string) {
+	b.client.MockSession(token)
+	if user, resp := b.client.GetUser("me", ""); resp.Error != nil {
 		println("There was a problem logging into the Mattermost server.  Are you sure ran the setup steps from the README.md?")
 		b.PrintError(resp.Error)
 		os.Exit(1)
@@ -130,7 +128,7 @@ func (b *Bot) loginAsTheBotUser(email, password string) {
 	}
 }
 
-func (b *Bot) findBotTeam(teamName string) {
+func (b *Bot) FindBotTeam(teamName string) {
 	if team, resp := b.client.GetTeamByName(teamName, ""); resp.Error != nil {
 		println("We failed to get the initial load")
 		println("or we do not appear to be a member of the team '" + teamName + "'")
@@ -183,34 +181,6 @@ func (b *Bot) SendMsgToDebuggingChannel(msg string, replyToId string) {
 	}
 }
 
-func (b *Bot) HandleWebSocketResponse(event *model.WebSocketEvent) {
-	if b.debuggingChannel != nil && event.Broadcast.ChannelId == b.debuggingChannel.Id {
-		b.HandleMsgFromDebuggingChannel(event)
-	}
-}
-
-func (b *Bot) HandleMsgFromDebuggingChannel(event *model.WebSocketEvent) {
-	if event.Event != model.WEBSOCKET_EVENT_POSTED {
-		return
-	}
-
-	println("responding to debugging channel msg")
-
-	post := model.PostFromJson(strings.NewReader(event.Data["post"].(string)))
-	if post != nil {
-		if post.UserId == b.botUser.Id {
-			return
-		}
-
-		if matched, _ := regexp.MatchString(`(?:^|\W)alive(?:$|\W)`, post.Message); matched {
-			b.SendMsgToDebuggingChannel("Yes I'm running", post.Id)
-			return
-		}
-	}
-
-	b.SendMsgToDebuggingChannel("I did not understand you!", post.Id)
-}
-
 func (b *Bot) PrintError(err *model.AppError) {
 	println("\tError Details:")
 	println("\t\t" + err.Message)
@@ -218,15 +188,11 @@ func (b *Bot) PrintError(err *model.AppError) {
 	println("\t\t" + err.DetailedError)
 }
 
-func (b *Bot) setupGracefulShutdown() {
+func (b *Bot) SetupGracefulShutdown() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
 		for _ = range c {
-			if b.webSocketClient != nil {
-				b.webSocketClient.Close()
-			}
-
 			b.SendMsgToDebuggingChannel("_"+ApplicationName+" has **stopped** running_", "")
 			os.Exit(0)
 		}
