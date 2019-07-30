@@ -10,7 +10,7 @@ RUN go mod download
 
 COPY ./ ./
 
-RUN GOOS=linux go build -ldflags="-w -s" -a -installsuffix 'static' -o /app
+RUN go generate && GOOS=linux go build -tags deploy_build -ldflags="-w -s" -a -installsuffix 'static' -o /app
 
 FROM alpine AS final
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo

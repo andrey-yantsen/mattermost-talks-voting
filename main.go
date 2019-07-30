@@ -1,3 +1,5 @@
+//go:generate go run assets/generate.go
+
 package main
 
 import (
@@ -8,8 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
-	"strings"
+	static "github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
 )
 
 const (
@@ -89,6 +90,8 @@ func (b *Bot) setupCommandHandlers() {
 	http.HandleFunc("/cmd/skip", b.HandleCmdSkip)
 	http.HandleFunc("/cmd/topics", b.HandleCmdTopics)
 	http.HandleFunc("/cmd/update", b.HandleCmdUpdate)
+	fileServer := http.FileServer(static.FS)
+	http.Handle("/static/", http.StripPrefix("/static", fileServer))
 }
 
 func (b *Bot) makeSureServerIsRunning() {
