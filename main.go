@@ -5,12 +5,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
 	"github.com/mattermost/mattermost-server/model"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
 )
 
 const (
@@ -90,6 +90,21 @@ func (b *Bot) setupCommandHandlers() {
 	http.HandleFunc("/cmd/skip", b.HandleCmdSkip)
 	http.HandleFunc("/cmd/topics", b.HandleCmdTopics)
 	http.HandleFunc("/cmd/update", b.HandleCmdUpdate)
+
+	http.HandleFunc("/index", func(w http.ResponseWriter, r *http.Request) {
+		err := renderTemplate("index", w, TemplateData{Title: "Index"})
+		if err != nil {
+			log.Panic(err)
+		}
+	})
+
+	http.HandleFunc("/index2", func(w http.ResponseWriter, r *http.Request) {
+		err := renderTemplate("index2", w, TemplateData{Title: "Index2"})
+		if err != nil {
+			log.Panic(err)
+		}
+	})
+
 	fileServer := http.FileServer(static.FS)
 	http.Handle("/static/", http.StripPrefix("/static", fileServer))
 }

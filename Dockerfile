@@ -10,7 +10,9 @@ RUN go mod download
 
 COPY ./ ./
 
-RUN go generate && GOOS=linux go build -tags deploy_build -ldflags="-w -s" -a -installsuffix 'static' -o /app
+ARG GO_BUILD_TAG="deploy_build"
+
+RUN go generate && GOOS=linux go build -tags ${GO_BUILD_TAG} -ldflags="-w -s" -a -installsuffix 'static' -o /app
 
 FROM alpine AS final
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
