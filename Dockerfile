@@ -12,9 +12,9 @@ COPY ./ ./
 
 ARG GO_BUILD_TAG="deploy_build"
 
-RUN go generate && GOOS=linux go build -tags ${GO_BUILD_TAG} -ldflags="-w -s" -a -installsuffix 'static' -o /app
+RUN go generate && CGO_ENABLED=1 GOOS=linux go build -tags ${GO_BUILD_TAG} -a -ldflags '-linkmode external -extldflags "-static"' -installsuffix 'static' -o /app
 
-FROM alpine AS final
+FROM scratch AS final
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /user/group /user/passwd /etc/
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
