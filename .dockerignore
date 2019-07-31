@@ -1,4 +1,5 @@
-storage/
+storage/*.sqlite3
+*_vfsdata.go
 .git/
 .dockerignore
 .gitignore
