@@ -1,10 +1,18 @@
-package main
+package commands
 
 import (
+	"github.com/andrey-yantsen/mattermost-talks-voting/bot"
+	"github.com/andrey-yantsen/mattermost-talks-voting/http_server"
+	"github.com/andrey-yantsen/mattermost-talks-voting/storage"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/mattermost/mattermost-server/model"
 	"net/http"
 )
+
+func init() {
+	http_server.Mux.HandleFunc("/cmd/register", HandleCmdRegister)
+	http_server.Mux.HandleFunc("/dialog/register", HandleDialogRegister)
+}
 
 // channel_id=1uixuy6o4bnax8mnddr7u8gq1h
 // &channel_name=talks-voting-bot-debug
@@ -17,7 +25,9 @@ import (
 // &trigger_id=ODV1NHNlMzVjN2dhM2J0ZDNkbTh6Nm9tZHc6anJ6dTdnNGd6amRmZnBob2ZzY3dtZWJ1OGM6MTU1MTMwNjYwMjk5MDpNRVVDSVFER05Zb2hpK3dxZEE4V2l4ZGdRTzlFU0VCSEFtS3JUMnVNaHNGZjJMaHFkZ0lnWUJmZlNoRC9FVnB2MGlSdWJsUGMyaEpmK0pRLzNxYTVHbjRvUFBweld6cz0%3D
 // &user_id=jrzu7g4gzjdffphofscwmebu8c
 // &user_name=andrey
-func (b *Bot) HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
+func HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
+	b := r.Context().Value("msg").(*bot.Bot)
+
 	err := r.ParseForm()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -34,7 +44,7 @@ func (b *Bot) HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
 
 	b.SendMsgToDebuggingChannel("```\n"+spew.Sdump(form)+"\n```", "")
 
-	if b.storage.IsRegistered(form.Get("channel_id")) {
+	if b.IsRegistered(form.Get("channel_id")) {
 		response.Text = "The channel is already registered, maybe you want to update some settings? Then call /talks-voting-update."
 		response.ResponseType = "ephemeral"
 		w.Write([]byte(response.ToJson()))
@@ -68,7 +78,9 @@ func (b *Bot) HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(response.ToJson()))
 }
 
-func (b *Bot) HandleDialogRegister(w http.ResponseWriter, r *http.Request) {
+func HandleDialogRegister(w http.ResponseWriter, r *http.Request) {
+	b := r.Context().Value("msg").(*bot.Bot)
+
 	request := model.SubmitDialogRequestFromJson(r.Body)
 	b.SendMsgToDebuggingChannel("```\n"+spew.Sdump(request)+"\n```", "")
 
@@ -76,7 +88,7 @@ func (b *Bot) HandleDialogRegister(w http.ResponseWriter, r *http.Request) {
 	params["channel_id"] = request.ChannelId
 	params["owner_id"] = request.UserId
 
-	reg, err := LoadRegistrationFromMap(params)
+	reg, err := storage.LoadRegistrationFromMap(params)
 
 	if err != nil {
 		b.SendMsgToDebuggingChannel("```\n"+spew.Sdump(err)+"\n```", "")
@@ -97,7 +109,7 @@ func (b *Bot) HandleDialogRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := b.storage.SaveRegistration(reg); err != nil {
+	if err := b.SaveRegistration(reg); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		panic(err)
 		return
