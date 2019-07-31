@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"github.com/andrey-yantsen/mattermost-talks-voting/assets/templates"
+	"github.com/mattermost/mattermost-server/model"
 	"html/template"
 	"io"
 )
@@ -17,29 +18,48 @@ type Navigation struct {
 type TemplateData struct {
 	Container interface{}
 	Title     string
+	Username  string
+	Channel   string
 }
 
 type templateData struct {
-	TemplateData
+	*TemplateData
 	Navigation []Navigation
 }
 
 var menu = []Navigation{
 	{
 		Active:   false,
-		Title:    "Home",
+		Title:    "My channels",
 		Template: "index",
-		Link:     "/index",
-	},
-	{
-		Active:   false,
-		Title:    "Home2",
-		Template: "index2",
-		Link:     "/index2",
+		Link:     "/",
 	},
 }
 
-func renderTemplate(templateName string, wr io.Writer, data TemplateData) error {
+func newTemplateData(userInfo *model.User, channelInfo *model.Channel, title string, container interface{}) *TemplateData {
+	username := ""
+	if userInfo != nil {
+		if userInfo.FirstName != "" && userInfo.LastName != "" {
+			username = userInfo.LastName + " " + userInfo.FirstName
+		} else {
+			username = userInfo.Username
+		}
+	}
+
+	channel := ""
+	if channelInfo != nil {
+		channel = channelInfo.Name
+	}
+
+	return &TemplateData{
+		Container: container,
+		Title:     title,
+		Username:  username,
+		Channel:   channel,
+	}
+}
+
+func renderTemplate(templateName string, wr io.Writer, data *TemplateData) error {
 	layout, err := initTemplate(template.New("layout"), "layout")
 	if err != nil {
 		return err

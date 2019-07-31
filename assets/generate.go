@@ -3,10 +3,10 @@
 package main
 
 import (
-	"log"
-	"github.com/shurcooL/vfsgen"
 	"github.com/andrey-yantsen/mattermost-talks-voting/assets/static"
 	"github.com/andrey-yantsen/mattermost-talks-voting/assets/templates"
+	"github.com/shurcooL/vfsgen"
+	"log"
 )
 
 func main() {

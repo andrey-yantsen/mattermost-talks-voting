@@ -55,7 +55,7 @@ func parseAuthCookie(next http.Handler) http.Handler {
 		cookie, err := r.Cookie("auth_token")
 		ctx := r.Context()
 		if err == nil && cookie.Value != "" {
-			bot := bot.ExtractBotFromContext(r)
+			bot := bot.ExtractBotFromRequest(r)
 			authToken := cookie.Value
 			userId, channelId, exists := bot.GetDetailsFromAuthenticationToken(authToken)
 			if exists {

@@ -19,7 +19,7 @@ func HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	b := bot.ExtractBotFromContext(r)
+	b := bot.ExtractBotFromRequest(r)
 
 	response := model.CommandResponse{
 		Username:  b.GetBotUser().Username,
@@ -37,7 +37,7 @@ func HandleCmdRegister(w http.ResponseWriter, r *http.Request) {
 	} else {
 		response.Text = "Please continue the registration on opened web-site."
 		response.ResponseType = "ephemeral"
-		response.GotoLocation = b.CreateLink(form.Get("user_id"), form.Get("channel_id"),"/register", url.Values{})
+		response.GotoLocation = b.CreateLink(form.Get("user_id"), form.Get("channel_id"), "/register", url.Values{})
 	}
 
 	w.Write([]byte(response.ToJson()))
