@@ -1,11 +1,18 @@
 package bot
 
 import (
+	"crypto/md5"
 	"fmt"
+	"github.com/ReneKroon/ttlcache"
 	"github.com/andrey-yantsen/mattermost-talks-voting/storage"
+	"github.com/jinzhu/copier"
 	"github.com/mattermost/mattermost-server/model"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"time"
 )
 
 const (
@@ -19,15 +26,21 @@ type Bot struct {
 	botTeam          *model.Team
 	debuggingChannel *model.Channel
 	storage          *storage.Storage
-	urlBase  string
+	urlBase          *url.URL
 	pingReceived     bool
+	cache            *ttlcache.Cache
 }
 
 func NewBot(serverUrl, accessToken, storageUrl, urlBase, teamName string, enableDebugChannel bool) *Bot {
 	ret := &Bot{
-		client:          model.NewAPIv4Client(serverUrl),
-		urlBase: urlBase,
+		client: model.NewAPIv4Client(serverUrl),
+		cache:  ttlcache.NewCache(),
 	}
+	url, err := url.Parse(urlBase)
+	if err != nil {
+		log.Panic(err)
+	}
+	ret.urlBase = url
 	ret.connectStorage(storageUrl)
 	ret.checkServerIsRunning()
 	ret.login(accessToken)
@@ -156,4 +169,61 @@ func (b *Bot) IsRegistered(channelId string) bool {
 
 func (b *Bot) SaveRegistration(r *storage.Registration) error {
 	return b.storage.SaveRegistration(r)
+}
+
+type authenticationTokenData struct {
+	userId string
+	channelId string
+}
+
+func (b *Bot) CreateAuthenticationToken(userId, channelId string) (token string) {
+	hasher := md5.New()
+	hasher.Write([]byte(userId))
+	hasher.Write([]byte(channelId))
+	hasher.Write([]byte(time.Now().Format(time.RFC3339Nano)))
+	token = fmt.Sprintf("%x", hasher.Sum(nil))
+	b.saveAuthenticationToken(token, userId, channelId)
+	return
+}
+
+func (b *Bot) saveAuthenticationToken(token, userId, channelId string) {
+	b.cache.SetWithTTL("auth_token_"+token, authenticationTokenData{userId, channelId}, 15 * time.Minute)
+}
+
+func (b *Bot) TouchAuthenticationToken(token string) bool {
+	if userId, channelId, exists := b.GetDetailsFromAuthenticationToken(token); exists {
+		b.saveAuthenticationToken(token, userId, channelId)
+		return true
+	} else {
+		return false
+	}
+}
+
+func (b *Bot) GetDetailsFromAuthenticationToken(token string) (userId, channelId string, exists bool) {
+	value, exists := b.cache.Get("auth_token_" + token)
+	if exists {
+		val := value.(authenticationTokenData)
+		userId = val.userId
+		channelId = val.channelId
+	}
+	return
+}
+
+func (b *Bot) CreateLink(userId, channelId, path string, params url.Values) string {
+	params.Add("auth_token", b.CreateAuthenticationToken(userId, channelId))
+	url := &url.URL{}
+	if err := copier.Copy(url, b.urlBase); err != nil {
+		log.Panic(err)
+	}
+	url.Path += path
+	url.RawQuery = params.Encode()
+	return url.String()
+}
+
+func (b *Bot) GetBotUser() *model.User {
+	return b.botUser
+}
+
+func ExtractBotFromContext(r *http.Request) *Bot {
+	return r.Context().Value("bot").(*Bot)
 }

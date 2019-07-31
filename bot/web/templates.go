@@ -1,4 +1,4 @@
-package main
+package web
 
 import (
 	"bytes"
@@ -8,15 +8,15 @@ import (
 )
 
 type Navigation struct {
-	Active bool
-	Title string
-	Link string
+	Active   bool
+	Title    string
+	Link     string
 	Template string
 }
 
 type TemplateData struct {
 	Container interface{}
-	Title string
+	Title     string
 }
 
 type templateData struct {
@@ -26,16 +26,16 @@ type templateData struct {
 
 var menu = []Navigation{
 	{
-		Active: false,
-		Title: "Home",
+		Active:   false,
+		Title:    "Home",
 		Template: "index",
-		Link: "/index",
+		Link:     "/index",
 	},
 	{
-		Active: false,
-		Title: "Home2",
+		Active:   false,
+		Title:    "Home2",
 		Template: "index2",
-		Link: "/index2",
+		Link:     "/index2",
 	},
 }
 
