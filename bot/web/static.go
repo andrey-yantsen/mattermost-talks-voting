@@ -7,6 +7,5 @@ import (
 )
 
 func init() {
-	http.Handle()
 	http_server.Mux.Handle("/static/", http.StripPrefix("/static", http.FileServer(static.FS)))
 }
