@@ -3,10 +3,22 @@ package web
 import (
 	"bytes"
 	"github.com/andrey-yantsen/mattermost-talks-voting/assets/templates"
+	"github.com/andrey-yantsen/mattermost-talks-voting/bot"
 	"github.com/mattermost/mattermost-server/model"
 	"html/template"
 	"io"
+	"net/http"
 )
+
+type dropdownValue struct {
+	Value string
+	Name string
+}
+
+type dropdownValueInt struct {
+	Value int
+	Name string
+}
 
 type Navigation struct {
 	Active   bool
@@ -36,6 +48,17 @@ var menu = []Navigation{
 	},
 }
 
+func newTemplateDataFromRequest(r *http.Request, title string, container interface{}) *TemplateData {
+	b := bot.ExtractBotFromRequest(r)
+	userId := r.Context().Value("user_id").(string)
+	channelId := r.Context().Value("channel_id").(string)
+
+	userInfo := b.GetUserInfo(userId)
+	channelInfo := b.GetChannelInfo(channelId)
+
+	return newTemplateData(userInfo, channelInfo, title, container)
+}
+
 func newTemplateData(userInfo *model.User, channelInfo *model.Channel, title string, container interface{}) *TemplateData {
 	username := ""
 	if userInfo != nil {
@@ -48,7 +71,7 @@ func newTemplateData(userInfo *model.User, channelInfo *model.Channel, title str
 
 	channel := ""
 	if channelInfo != nil {
-		channel = channelInfo.Name
+		channel = channelInfo.DisplayName
 	}
 
 	return &TemplateData{
