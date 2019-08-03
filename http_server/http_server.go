@@ -37,7 +37,7 @@ func replaceAuthTokenParamWithCookie(next http.Handler) http.Handler {
 				Name:     "auth_token",
 				Value:    authToken,
 				Path:     "/",
-				Expires:  time.Now().Add(time.Hour * 24),
+				Expires:  time.Now().Add(time.Hour * 1440),
 				HttpOnly: true,
 			})
 			query := r.URL.Query()
